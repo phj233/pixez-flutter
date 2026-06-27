@@ -59,8 +59,8 @@ class Leader {
 
   static Future<bool> pushWithUri(BuildContext context, Uri link) async {
     if (Constants.isFluent) {
-      FluentLeader.pushWithUri(context, link);
-      return false;
+      await FluentLeader.pushWithUri(context, link);
+      return true;
     }
     // https://www.pixiv.net/novel/series/$id
     if (link.path.contains("novel") && link.path.contains("series")) {

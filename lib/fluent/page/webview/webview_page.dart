@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:bot_toast/bot_toast.dart';
 import 'package:fluent_ui/fluent_ui.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
+import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart';
 import 'package:pixez/custom_tab_plugin.dart';
 import 'package:pixez/er/leader.dart';
 import 'package:pixez/main.dart';
@@ -16,25 +19,46 @@ class WebViewPage extends StatefulWidget {
 }
 
 class _WebViewPageState extends State<WebViewPage> {
-  late final WebViewController _webViewController;
+  late final WindowsInAppWebViewWidget _webViewWidget;
+  PlatformInAppWebViewController? _webViewController;
   double progressValue = 0.0;
+  bool _handledRedirect = false;
 
   @override
   void initState() {
     super.initState();
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (int progress) {
-            setState(() => progressValue = progress / 100);
-          },
-          onPageStarted: (String url) {},
-          onPageFinished: (String url) async {
-            final uri = Uri.parse(url);
-            if (userSetting.oauthNetworkMode.usesCompatibleConnection &&
-                uri.host == "accounts.pixiv.net") {
-              _webViewController.runJavaScript("""
+    _webViewWidget = WindowsInAppWebViewWidget(
+      WindowsInAppWebViewWidgetCreationParams(
+        initialUrlRequest: URLRequest(url: WebUri(widget.url)),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          useShouldOverrideUrlLoading: true,
+        ),
+        onWebViewCreated: (controller) {
+          _webViewController = controller as PlatformInAppWebViewController;
+        },
+        onProgressChanged: (controller, progress) {
+          if (mounted) setState(() => progressValue = progress / 100);
+        },
+        onLoadStart: (controller, url) => _handleLoginRedirect(url),
+        onLoadStop: (controller, url) =>
+            _hideUnavailableLoginMethods(controller, url),
+        onReceivedError: (controller, request, error) {},
+        shouldOverrideUrlLoading: (controller, navigationAction) =>
+            _handleNavigation(navigationAction),
+      ),
+    );
+  }
+
+  Future<void> _hideUnavailableLoginMethods(
+    PlatformInAppWebViewController controller,
+    WebUri? url,
+  ) async {
+    if (url == null) return;
+    if (userSetting.oauthNetworkMode.usesCompatibleConnection &&
+        url.host == "accounts.pixiv.net") {
+      await controller.evaluateJavascript(
+        source: """
 javascript:(function() {
  let forms = document.getElementsByTagName('form'); 
  for (let name of forms) {
@@ -48,28 +72,58 @@ javascript:(function() {
         name.style.display = 'none';
 } 
   })()
-""");
-            }
-          },
-          onWebResourceError: (WebResourceError error) {},
-          onNavigationRequest: (NavigationRequest request) {
-            var uri = Uri.parse(request.url);
-            if (uri.scheme == "pixiv") {
-              Leader.pushWithUri(context, uri);
-              Navigator.of(context).pop("OK");
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.url));
+""",
+      );
+    }
+  }
+
+  Future<NavigationActionPolicy> _handleNavigation(
+    NavigationAction navigationAction,
+  ) async {
+    final redirectUri = _oauthRedirectUri(navigationAction.request.url);
+    if (redirectUri != null) {
+      _handleLoginRedirect(redirectUri);
+      return NavigationActionPolicy.CANCEL;
+    }
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  Uri? _oauthRedirectUri(Uri? uri) {
+    if (uri == null) return null;
+    if (uri.scheme == "pixiv") return uri;
+    if (uri.host == "app-api.pixiv.net" &&
+        uri.path.endsWith("/web/v1/users/auth/pixiv/callback")) {
+      final code = uri.queryParameters["code"];
+      if (code != null && code.isNotEmpty) {
+        return Uri(
+          scheme: "pixiv",
+          host: "account",
+          queryParameters: {"code": code},
+        );
+      }
+    }
+    return null;
+  }
+
+  void _handleLoginRedirect(Uri? uri) {
+    final redirectUri = _oauthRedirectUri(uri);
+    if (redirectUri == null || _handledRedirect) return;
+    _handledRedirect = true;
+    final controller = _webViewController;
+    if (controller != null) unawaited(controller.stopLoading());
+    unawaited(_completeLogin(redirectUri));
+  }
+
+  Future<void> _completeLogin(Uri uri) async {
+    await Leader.pushWithUri(context, uri);
+    if (mounted) Navigator.of(context).pop("OK");
   }
 
   @override
   void dispose() {
-    super.dispose();
+    _webViewWidget.dispose();
     WeissPlugin.stop();
+    super.dispose();
   }
 
   @override
@@ -89,7 +143,7 @@ javascript:(function() {
           ),
           IconButton(
             icon: Icon(FluentIcons.refresh),
-            onPressed: () => _webViewController.reload(),
+            onPressed: () => _webViewController?.reload(),
           ),
           SizedBox(width: 8.0),
           Visibility(
@@ -98,7 +152,7 @@ javascript:(function() {
           ),
         ],
       ),
-      content: WebViewWidget(controller: _webViewController),
+      content: _webViewWidget.build(context),
     );
   }
 }

@@ -229,6 +229,10 @@ class PixEzNavigator extends StatefulWidget {
         ? context.findRootAncestorStateOfType<PixEzNavigatorState>() ??
               navigator
         : navigator ?? context.findAncestorStateOfType<PixEzNavigatorState>();
+    navigator ??= context
+        .findAncestorStateOfType<_NavigationFrameworkState>()
+        ?._navigatorKey
+        .currentState;
 
     assert(() {
       if (navigator == null) {

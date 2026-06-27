@@ -62,7 +62,9 @@ class _FluentHelloPageState extends State<FluentHelloPage> {
           initIndex: initIndex,
           defaultTitle: const Text('PixEz'),
           displayMode: isTop ? PaneDisplayMode.top : PaneDisplayMode.auto,
-          header: isTop ? null : _buildHeader(isLogin),
+          header: isTop
+              ? null
+              : Builder(builder: (context) => _buildHeader(context, isLogin)),
           autoSuggestBox: PixEzSearchBox(),
           items: isLogin
               ? [
@@ -171,7 +173,7 @@ class _FluentHelloPageState extends State<FluentHelloPage> {
     );
   }
 
-  Widget _buildHeader(bool isLogin) {
+  Widget _buildHeader(BuildContext context, bool isLogin) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16.0),
       child: isLogin
