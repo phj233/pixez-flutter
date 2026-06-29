@@ -19,9 +19,9 @@ import 'package:fluent_ui/fluent_ui.dart';
 import 'package:pixez/custom_tab_plugin.dart';
 import 'package:pixez/er/leader.dart';
 import 'package:pixez/fluent/page/login/token_page.dart';
+import 'package:pixez/fluent/page/webview/oauth_redirect_uri.dart';
 import 'package:pixez/fluent/page/webview/webview_page.dart';
 import 'package:pixez/i18n.dart';
-import 'package:pixez/main.dart';
 import 'package:pixez/network/oauth_client.dart';
 import 'package:pixez/fluent/page/about/about_page.dart';
 import 'package:pixez/fluent/page/hello/setting/setting_quality_page.dart';
@@ -164,22 +164,19 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   _launch(url) async {
-    if (userSetting.oauthNetworkMode.usesCompatibleConnection) {
-      // await WeissServer.listener();
-      // await WeissPlugin.start();
-      // await WeissPlugin.proxy();
+    if (isPixivOAuthWebViewUrl(url)) {
       Leader.push(
         context,
         WebViewPage(url: url),
         icon: Icon(FluentIcons.signin),
         title: Text(I18n.of(context).login),
       );
-    } else {
-      try {
-        CustomTabPlugin.launch(url);
-      } catch (e) {
-        BotToast.showText(text: e.toString());
-      }
+      return;
+    }
+    try {
+      CustomTabPlugin.launch(url);
+    } catch (e) {
+      BotToast.showText(text: e.toString());
     }
   }
 }
