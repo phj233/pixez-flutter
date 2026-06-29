@@ -26,6 +26,7 @@ import 'package:intl/intl.dart';
 import 'package:pixez/constants.dart';
 import 'package:pixez/crypto_plugin.dart';
 import 'package:pixez/main.dart';
+import 'package:pixez/network/network_mode.dart';
 import 'package:pixez/network/pixez_network_settings.dart';
 import 'package:rhttp/rhttp.dart' as r;
 
@@ -113,41 +114,42 @@ class OAuthClient {
     String passWord, {
     String deviceToken = "pixiv",
   }) {
-    return httpClient.post(
-      "/auth/token",
-      data: {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "password",
-        "username": userName,
-        "password": passWord,
-        "Device_token": deviceToken,
-        "get_secure_url": true,
-        "include_policy": true,
-      },
-    );
+    return _postAuthTokenWithFallback({
+      "client_id": CLIENT_ID,
+      "client_secret": CLIENT_SECRET,
+      "grant_type": "password",
+      "username": userName,
+      "password": passWord,
+      "Device_token": deviceToken,
+      "get_secure_url": true,
+      "include_policy": true,
+    });
   }
 
   Future<Response> code2Token(String code) {
-    return httpClient.post(
-      "/auth/token",
-      data: {
-        "code": code,
-        "redirect_uri":
-            "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
-        "grant_type": "authorization_code",
-        "include_policy": true,
-        "client_id": CLIENT_ID,
-        "code_verifier": Constants.code_verifier,
-        "client_secret": CLIENT_SECRET,
-      },
-      options: Options(contentType: Headers.formUrlEncodedContentType),
-    );
+    return _postAuthTokenWithFallback({
+      "code": code,
+      "redirect_uri":
+          "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
+      "grant_type": "authorization_code",
+      "include_policy": true,
+      "client_id": CLIENT_ID,
+      "code_verifier": Constants.code_verifier,
+      "client_secret": CLIENT_SECRET,
+    }, options: Options(contentType: Headers.formUrlEncodedContentType));
   }
 
   static Future<String> generateWebviewUrl({bool create = false}) async {
     await generateCodeVerify();
     String codeChallenge = await CryptoPlugin.getCodeChallenge();
+    if (Platform.isWindows &&
+        !create &&
+        userSetting.oauthNetworkMode == NetworkMode.compat) {
+      final returnTo = Uri.encodeComponent(
+        "https://app-api.pixiv.net/web/v1/users/auth/pixiv/start?code_challenge=${codeChallenge}&code_challenge_method=S256&client=pixiv-android",
+      );
+      return "https://accounts.pixiv.net/login?prompt=select_account&return_to=${returnTo}&source=pixiv-android&ref=";
+    }
     String url = !create
         ? "https://app-api.pixiv.net/web/v1/login?code_challenge=${codeChallenge}&code_challenge_method=S256&client=pixiv-android"
         : "https://app-api.pixiv.net/web/v1/provisional-accounts/create?code_challenge=${codeChallenge}&code_challenge_method=S256&client=pixiv-android";
@@ -162,15 +164,43 @@ class OAuthClient {
     refreshToken = String,
     deviceToken = String,
   }) {
-    return httpClient.post(
-      "/auth/token",
-      data: {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "refresh_token",
-        "refresh_token": refreshToken,
-        "include_policy": true,
-      },
-    );
+    return _postAuthTokenWithFallback({
+      "client_id": CLIENT_ID,
+      "client_secret": CLIENT_SECRET,
+      "grant_type": "refresh_token",
+      "refresh_token": refreshToken,
+      "include_policy": true,
+    });
+  }
+
+  Future<Response> _postAuthTokenWithFallback(
+    Map<String, dynamic> data, {
+    Options? options,
+  }) async {
+    try {
+      return await httpClient.post("/auth/token", data: data, options: options);
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 421 &&
+          (e.response != null || e.type == DioExceptionType.cancel)) {
+        rethrow;
+      }
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: httpClient.options.baseUrl,
+          headers: Map<String, dynamic>.from(httpClient.options.headers),
+          contentType: httpClient.options.contentType,
+        ),
+      );
+      if (kDebugMode) {
+        dio.interceptors.add(
+          LogInterceptor(
+            responseBody: true,
+            responseHeader: true,
+            requestBody: true,
+          ),
+        );
+      }
+      return dio.post("/auth/token", data: data, options: options);
+    }
   }
 }
